@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบโหวตชื่อองค์กร</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Google Fonts: Sarabun & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Canvas Confetti for Voting Celebration -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <!-- Firebase SDK Modules -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, increment, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'voting-app-v1';
+    
+    const firebaseConfig = typeof __firebase_config !== 'undefined' 
+      ? JSON.parse(__firebase_config) 
+      : {
+          apiKey: "demo-api-key",
+          authDomain: "demo-app.firebaseapp.com",
+          projectId: "demo-app",
+          storageBucket: "demo-app.appspot.com",
+          messagingSenderId: "1234567890",
+          appId: "1:1234567890:web:1234567890"
+        };
+
+    try {
+      const app = initializeApp(firebaseConfig);
+      const db = getFirestore(app);
+      const auth = getAuth(app);
+
+      window.db = db;
+      window.auth = auth;
+      window.appId = appId;
+      window.doc = doc;
+      window.setDoc = setDoc;
+      window.updateDoc = updateDoc;
+      window.deleteDoc = deleteDoc;
+      window.collection = collection;
+      window.onSnapshot = onSnapshot;
+      window.increment = increment;
+      window.writeBatch = writeBatch;
+
+      async function initAuth() {
+        try {
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            await signInWithCustomToken(auth, __initial_auth_token);
+          } else {
+            await signInAnonymously(auth);
+          }
+        } catch (err) {
+          console.warn("Auth warning (using local fallback if needed):", err);
+          window.useLocalFallback();
+        }
+      }
+
+      onAuthStateChanged(auth, (user) => {
+        if (user) {
+          window.currentUser = user;
+          window.initCloudSync();
+        } else {
+          window.useLocalFallback();
+        }
+      });
+
+      initAuth();
+    } catch (e) {
+      console.warn("Firebase initialization failed, running in offline mode:", e);
+      window.useLocalFallback();
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Sarabun', 'Inter', sans-serif;
+      background-color: #f8fafc;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    .gold-glow {
+      box-shadow: 0 10px 25px -5px rgba(234, 179, 8, 0.3);
+    }
+    .silver-glow {
+      box-shadow: 0 10px 25px -5px rgba(148, 163, 184, 0.3);
+    }
+    .bronze-glow {
+      box-shadow: 0 10px 25px -5px rgba(217, 119, 6, 0.3);
+    }
+  </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col justify-between">
+
+  <header class="bg-indigo-900 text-white shadow-lg sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex justify-between items-center h-16 gap-2">
+        <div class="flex items-center space-x-2 sm:space-x-3 cursor-pointer min-w-0" onclick="switchTab('vote')">
+          <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md flex-shrink-0">
+            <i class="fa-solid fa-check-to-slot text-lg sm:text-xl"></i>
+          </div>
+          <div class="truncate">
+            <h1 class="font-bold text-sm sm:text-lg leading-tight truncate">ระบบโหวตชื่อองค์กร</h1>
+            <p class="text-[10px] sm:text-xs text-indigo-200 truncate">สถาบัน/ศูนย์พัฒนาวิชาการระดับพื้นที่</p>
+          </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <nav class="flex space-x-1 sm:space-x-2 flex-shrink-0">
+          <button id="nav-vote" onclick="switchTab('vote')" class="px-2.5 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center space-x-1 sm:space-x-1.5 bg-indigo-800 text-white">
+            <i class="fa-solid fa-vote-yea"></i>
+            <span class="hidden sm:inline">หน้าโหวต</span>
+          </button>
+          <button id="nav-results" onclick="switchTab('results')" class="px-2.5 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center space-x-1 sm:space-x-1.5 text-indigo-200 hover:bg-indigo-800 hover:text-white">
+            <i class="fa-solid fa-trophy text-amber-400"></i>
+            <span class="text-xs sm:text-sm">สรุปผล 5 อันดับแรก</span>
+          </button>
+          <button id="nav-admin" onclick="switchTab('admin')" class="px-2.5 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center space-x-1 sm:space-x-1.5 text-indigo-200 hover:bg-indigo-800 hover:text-white">
+            <i class="fa-solid fa-user-gear"></i>
+            <span class="hidden xs:inline sm:inline">แอดมิน</span>
+          </button>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-grow w-full">
+
+    <!-- ================= 1. VOTE VIEW ================= -->
+    <section id="view-vote" class="space-y-6">
+      
+      <!-- Instructions & Stats Banner -->
+      <div class="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-2xl p-6 text-white shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
+        <div class="space-y-2 text-center md:text-left">
+          <div class="inline-flex items-center space-x-2 bg-indigo-500/40 px-3 py-1 rounded-full text-xs font-semibold text-indigo-100 border border-indigo-300/30">
+            <i class="fa-solid fa-circle-info"></i>
+            <span>กติกาการลงคะแนน</span>
+          </div>
+          <h2 class="text-2xl font-bold">กรุณาเลือกชื่อที่คุณเห็นว่าเหมาะสม <span class="underline decoration-amber-400 decoration-4">จำนวน 3 ชื่อ</span></h2>
+          <p class="text-indigo-100 text-sm max-w-xl">
+            ท่านสามารถเลือกได้ 3 ชื่อตามที่ท่านเห็นชอบ และเมื่อเลือกครบ 3 ชื่อแล้ว สามารถกดปุ่ม "ยืนยันการลงคะแนน" ด้านล่างได้ทันที
+          </p>
+        </div>
+
+        <!-- Selection Counter Badge -->
+        <div class="bg-white/10 backdrop-blur-md border border-white/20 p-4 rounded-xl text-center min-w-[200px] w-full md:w-auto">
+          <p class="text-xs text-indigo-100 font-medium">เลือกแล้วทั้งหมด</p>
+          <div class="text-3xl font-extrabold text-white my-1">
+            <span id="vote-selected-count" class="text-amber-300">0</span>
+            <span class="text-lg font-normal text-indigo-200">/ 3 ชื่อ</span>
+          </div>
+          <div id="status-badge" class="inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full bg-red-500/80 text-white">
+            ยังเลือกไม่ครบ 3 ชื่อ
+          </div>
+        </div>
+      </div>
+
+      <!-- Search & Filter Controls -->
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+        <div class="flex flex-col sm:flex-row gap-3 items-center justify-between">
+          <div class="relative w-full sm:w-96">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input type="text" id="vote-search-input" oninput="renderVoteList()" placeholder="ค้นหาเลขข้อ (เช่น 1, 15), ชื่อ, หรือ สสว...." class="w-full pl-10 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all">
+          </div>
+          
+          <div class="flex items-center space-x-2 w-full sm:w-auto justify-end">
+            <label for="vote-filter-ssw" class="text-xs font-semibold text-slate-500 whitespace-nowrap">กรองตามหน่วยงาน:</label>
+            <select id="vote-filter-ssw" onchange="renderVoteList()" class="px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="ALL">ทั้งหมดทุก สสว.</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Quick Keyword Filter Pills -->
+        <div class="flex items-center space-x-2 pt-1 overflow-x-auto custom-scrollbar pb-1 text-xs">
+          <span class="text-slate-400 font-medium whitespace-nowrap flex items-center space-x-1">
+            <i class="fa-solid fa-tags text-indigo-500"></i>
+            <span>คีย์เวิร์ดยอดนิยม:</span>
+          </span>
+          <div id="keyword-pills-container" class="flex items-center space-x-1.5">
+            <!-- Dynamically rendered pill tags -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Candidate Selection Grid -->
+      <div id="vote-items-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Sticky Footer Submit Bar -->
+      <div class="sticky bottom-3 sm:bottom-6 z-20 mt-6 sm:mt-8 px-2 sm:px-0">
+        <div class="max-w-xl mx-auto bg-slate-900/95 backdrop-blur-md text-white p-3.5 sm:p-4 rounded-2xl shadow-2xl border border-slate-700/50 flex flex-row items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-[10px] sm:text-xs text-slate-400">สถานะการเลือกของคุณ</p>
+            <p class="text-xs sm:text-sm font-semibold text-white truncate" id="sticky-selection-summary">กรุณาเลือกให้ครบ 3 ชื่อ (เลือกแล้ว 0/3)</p>
+          </div>
+          <button id="btn-submit-vote" onclick="submitVote()" disabled class="px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm bg-slate-700 text-slate-400 cursor-not-allowed transition-all shadow-lg flex items-center space-x-2 whitespace-nowrap flex-shrink-0">
+            <i class="fa-solid fa-paper-plane"></i>
+            <span>ยืนยันการลงคะแนน</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 2. RESULTS VIEW (TOP 5 LEADERBOARD) ================= -->
+    <section id="view-results" class="space-y-8 hidden">
+      
+      <!-- Leaderboard Title Header -->
+      <div class="text-center space-y-2">
+        <div class="inline-flex items-center space-x-2 bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-bold border border-amber-300">
+          <i class="fa-solid fa-trophy text-amber-600"></i>
+          <span>สรุปผลการโหวต ณ ปัจจุบัน</span>
+        </div>
+        <h2 class="text-3xl font-extrabold text-slate-900">5 อันดับชื่อที่ได้รับคะแนนสูงสุด</h2>
+        <p class="text-slate-500 text-sm">อัปเดตข้อมูลคะแนนโหวตแบบ Real-time จากผู้ลงคะแนนทั้งหมด</p>
+      </div>
+
+      <!-- Top 3 Podium Displays -->
+      <div id="podium-container" class="grid grid-cols-1 md:grid-cols-3 gap-6 items-end pt-4">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Rank 4 & Rank 5 Cards -->
+      <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+        <h3 class="font-bold text-slate-800 text-lg flex items-center space-x-2">
+          <i class="fa-solid fa-list-ol text-indigo-600"></i>
+          <span>อันดับที่ 4 และ 5</span>
+        </h3>
+        <div id="rank-4-5-container" class="space-y-3">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+
+      <!-- Full Scores Overview Expandable Section -->
+      <div class="bg-slate-50 rounded-2xl p-6 border border-slate-200 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <h3 class="font-bold text-slate-700 flex items-center space-x-2">
+            <i class="fa-solid fa-chart-bar text-slate-500"></i>
+            <span>ตารางคะแนนทั้งหมดทุกรายชื่อ</span>
+          </h3>
+          <div class="flex items-center space-x-2">
+            <span id="total-voters-badge" class="text-xs bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full font-bold">
+              ผู้ลงคะแนน: 0 คน
+            </span>
+            <span id="total-vote-count-badge" class="text-xs bg-slate-200 text-slate-700 px-3 py-1 rounded-full font-semibold">
+              รวม 0 คะแนนโหวต
+            </span>
+          </div>
+        </div>
+        <div class="overflow-x-auto bg-white rounded-xl border border-slate-200 shadow-sm custom-scrollbar">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-slate-100 text-slate-600 text-xs uppercase font-semibold border-b border-slate-200">
+              <tr>
+                <th class="py-3 px-4 w-16 text-center">อันดับ</th>
+                <th class="py-3 px-4 w-20 text-center">เลขข้อ</th>
+                <th class="py-3 px-4 w-28">สสว./หน่วยงาน</th>
+                <th class="py-3 px-4">ชื่อองค์กร & คีย์เวิร์ด</th>
+                <th class="py-3 px-4 text-right w-28">คะแนนโหวต</th>
+                <th class="py-3 px-4 w-40">สัดส่วน</th>
+              </tr>
+            </thead>
+            <tbody id="all-scores-tbody" class="divide-y divide-slate-100">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 3. ADMIN VIEW ================= -->
+    <section id="view-admin" class="space-y-6 hidden">
+      
+      <!-- Admin Header / Bar -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="bg-red-100 text-red-700 text-xs font-bold px-2.5 py-0.5 rounded-full">Admin Area</span>
+            <h2 class="text-2xl font-bold text-slate-900">แผงควบคุมระบบผู้ดูแลระบบ</h2>
+          </div>
+          <p class="text-slate-500 text-sm mt-1">จัดการรายชื่อองค์กร คีย์เวิร์ดสำคัญ แก้ไข ข้อมูล และบริหารจัดการคะแนนโหวต</p>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <button onclick="promptResetVotes()" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium text-sm transition-all shadow-sm flex items-center space-x-2">
+            <i class="fa-solid fa-rotate-left"></i>
+            <span>ล้างคะแนนโหวตเป็น 0</span>
+          </button>
+          <button onclick="promptRestoreDefaults()" class="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-xl font-medium text-sm transition-all shadow-sm flex items-center space-x-2">
+            <i class="fa-solid fa-arrows-rotate"></i>
+            <span>รีเซ็ตเป็น 26 ชื่อตั้งต้น</span>
+          </button>
+          <button onclick="logoutAdmin()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-medium text-sm transition-all">
+            <i class="fa-solid fa-right-from-bracket"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Add New Name Form -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <h3 class="font-bold text-slate-800 text-base flex items-center space-x-2">
+          <i class="fa-solid fa-square-plus text-indigo-600"></i>
+          <span>เพิ่มรายชื่อองค์กรใหม่</span>
+        </h3>
+        
+        <form onsubmit="handleAddName(event)" class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+          <div class="sm:col-span-3">
+            <label class="block text-xs font-medium text-slate-600 mb-1">สสว./หน่วยงาน</label>
+            <input type="text" id="add-ssw-input" placeholder="เช่น สสว 1" required class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+          <div class="sm:col-span-5">
+            <label class="block text-xs font-medium text-slate-600 mb-1">ชื่อองค์กร</label>
+            <input type="text" id="add-name-input" placeholder="ระบุชื่อองค์กรหรือสถาบันที่ต้องการเพิ่ม" required class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+          <div class="sm:col-span-4">
+            <label class="block text-xs font-medium text-slate-600 mb-1">คีย์เวิร์ดสำคัญ (แยกด้วยจุลภาค ,)</label>
+            <input type="text" id="add-keywords-input" placeholder="เช่น วิชาการ, พัฒนาสังคม, ระดับพื้นที่" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+          <div class="sm:col-span-12 flex justify-end">
+            <button type="submit" class="py-2.5 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-lg transition-all shadow-md flex items-center justify-center space-x-2">
+              <i class="fa-solid fa-plus"></i>
+              <span>เพิ่มรายชื่อและคีย์เวิร์ด</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Admin Management Table -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+          <h3 class="font-bold text-slate-800 text-sm flex items-center space-x-2">
+            <i class="fa-solid fa-list-check text-slate-500"></i>
+            <span>รายการชื่อทั้งหมดในระบบ (<span id="admin-total-items">0</span> รายการ)</span>
+          </h3>
+          <div class="w-64">
+            <input type="text" id="admin-search-input" oninput="renderAdminTable()" placeholder="ค้นหาในแอดมิน..." class="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+        </div>
+
+        <div class="overflow-x-auto custom-scrollbar">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-slate-100 text-slate-600 text-xs uppercase font-semibold border-b border-slate-200">
+              <tr>
+                <th class="py-3 px-4 w-16 text-center">ID</th>
+                <th class="py-3 px-4 w-28">สสว./หน่วยงาน</th>
+                <th class="py-3 px-4">ชื่อองค์กร & คีย์เวิร์ด</th>
+                <th class="py-3 px-4 text-center w-28">คะแนนปัจจุบัน</th>
+                <th class="py-3 px-4 text-right w-36">การจัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="admin-tbody" class="divide-y divide-slate-100">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-900 text-slate-400 py-6 border-t border-slate-800 text-xs text-center">
+      <div class="max-w-7xl mx-auto px-4 space-y-1">
+        <p>ระบบโหวตชื่อองค์กรพัฒนาวิชาการพัฒนาสังคมเชิงพื้นที่</p>
+        <p class="text-slate-500">รองรับการใช้งานอย่างสมบูรณ์แบบบนสมาร์ตโฟน แท็บเล็ต และเดสก์ท็อป</p>
+      </div>
+    </footer>
+
+  <!-- MODAL: ADMIN PIN AUTHENTICATION -->
+  <div id="modal-pin" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="text-center space-y-2">
+        <div class="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto text-xl">
+          <i class="fa-solid fa-lock"></i>
+        </div>
+        <h3 class="text-xl font-bold text-slate-900">เข้าสู่ระบบแอดมิน</h3>
+        <p class="text-xs text-slate-500">กรุณากรอกรหัสผ่านเพื่อเข้าใช้งานส่วนผู้ดูแลระบบ</p>
+      </div>
+
+      <form onsubmit="handlePinSubmit(event)" class="space-y-4">
+        <div>
+          <input type="password" id="input-pin" maxlength="6" autofocus placeholder="กรอกรหัสผ่าน 4 หลัก" class="w-full text-center text-2xl tracking-widest py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono">
+          <p id="pin-error" class="text-xs text-red-500 mt-1 text-center hidden">รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง</p>
+        </div>
+        <div class="flex space-x-2">
+          <button type="button" onclick="closePinModal()" class="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium text-sm rounded-xl transition-all">ยกเลิก</button>
+          <button type="submit" class="w-1/2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow-md transition-all">ยืนยัน</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT CANDIDATE -->
+  <div id="modal-edit" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-900 flex items-center space-x-2">
+          <i class="fa-solid fa-pen-to-square text-indigo-600"></i>
+          <span>แก้ไขข้อมูลรายชื่อ & คีย์เวิร์ด</span>
+        </h3>
+        <button onclick="closeEditModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <form onsubmit="handleEditSubmit(event)" class="space-y-3">
+        <input type="hidden" id="edit-id">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">สสว./หน่วยงาน</label>
+          <input type="text" id="edit-ssw" required class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">ชื่อองค์กร</label>
+          <textarea id="edit-name" rows="3" required class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">คีย์เวิร์ดสำคัญ (ใช้เครื่องหมายจุลภาค , คั่น)</label>
+          <input type="text" id="edit-keywords" placeholder="เช่น วิชาการ, พัฒนาสังคม, ระดับพื้นที่" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div class="flex justify-end space-x-2 pt-2">
+          <button type="button" onclick="closeEditModal()" class="px-4 py-2 bg-slate-100 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-200">ยกเลิก</button>
+          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white text-sm font-bold rounded-xl hover:bg-indigo-700 shadow-md">บันทึกการแก้ไข</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: GENERIC CONFIRMATION -->
+  <div id="modal-confirm" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4">
+      <div id="confirm-icon-bg" class="w-14 h-14 rounded-full flex items-center justify-center mx-auto text-2xl bg-amber-100 text-amber-600">
+        <i id="confirm-icon" class="fa-solid fa-triangle-exclamation"></i>
+      </div>
+      <div>
+        <h3 id="confirm-title" class="text-lg font-bold text-slate-900">ยืนยันการทำรายการ</h3>
+        <p id="confirm-message" class="text-xs text-slate-500 mt-1">คุณแน่ใจหรือไม่ว่าต้องการดำเนินการนี้?</p>
+      </div>
+      <div class="flex space-x-2 pt-2">
+        <button id="btn-confirm-cancel" class="w-1/2 py-2.5 bg-slate-100 text-slate-600 font-medium text-sm rounded-xl">ยกเลิก</button>
+        <button id="btn-confirm-ok" class="w-1/2 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-xl shadow-md">ตกลง</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div id="toast-container" class="fixed top-20 right-4 z-50 space-y-2 pointer-events-none"></div>
+
+  <script>
+    /* INITIAL 26 NAMES with Keywords extracted and categorized */
+    const INITIAL_NAMES = [
+      { id: 1, ssw: "สสว 9", name: "ศูนย์พัฒนาวิชาการเพื่อการพัฒนาสังคมจังหวัด", keywords: ["วิชาการ", "พัฒนาสังคม", "ระดับจังหวัด"] },
+      { id: 2, ssw: "สสว 3", name: "ศูนย์ยุทธศาสตร์การพัฒนาสังคม", keywords: ["ยุทธศาสตร์", "พัฒนาสังคม"] },
+      { id: 3, ssw: "สสว 6", name: "ศูนย์ส่งเสริมและพัฒนางานด้านสังคม", keywords: ["ส่งเสริมและพัฒนา", "งานสังคม"] },
+      { id: 4, ssw: "สสว 10", name: "สถาบันการพัฒนาสังคมเชิงพื้นที่", keywords: ["พัฒนาสังคม", "เชิงพื้นที่"] },
+      { id: 5, ssw: "สสว 6", name: "สถาบันขับเคลื่อนการพัฒนาสังคมในพื้นที่", keywords: ["ขับเคลื่อน", "พัฒนาสังคม", "ระดับพื้นที่"] },
+      { id: 6, ssw: "สสว 6", name: "สถาบันขับเคลื่อนคุณภาพชีวิตประชาชนในพื้นที่", keywords: ["ขับเคลื่อน", "คุณภาพชีวิต", "ระดับพื้นที่"] },
+      { id: 7, ssw: "สสว 6", name: "สถาบันเชื่อมโยงการพัฒนาสังคมสู่พื้นที่", keywords: ["เชื่อมโยง", "พัฒนาสังคม", "ระดับพื้นที่"] },
+      { id: 8, ssw: "สสว 1", name: "สถาบันบูรณาการการพัฒนาสังคมจังหวัด", keywords: ["บูรณาการ", "พัฒนาสังคม", "ระดับจังหวัด"] },
+      { id: 9, ssw: "สสว 2", name: "สถาบันพัฒนาวิชาการด้านความมั่นคงของมนุษย์", keywords: ["วิชาการ", "ความมั่นคงของมนุษย์"] },
+      { id: 10, ssw: "สสว 6", name: "สถาบันยกระดับการพัฒนาสังคมในพื้นที่", keywords: ["ยกระดับ", "พัฒนาสังคม", "ระดับพื้นที่"] },
+      { id: 11, ssw: "สสว 2", name: "สถาบันยุทธศาสตร์ด้านการพัฒนาสังคมพื้นที่", keywords: ["ยุทธศาสตร์", "พัฒนาสังคม", "ระดับพื้นที่"] },
+      { id: 12, ssw: "สสว 10", name: "สถาบันยุทธศาสตร์สังคมและการพัฒนาเชิงพื้นที่", keywords: ["ยุทธศาสตร์สังคม", "พัฒนาเชิงพื้นที่"] },
+      { id: 13, ssw: "สสว 9", name: "สถาบันวิชาการเพื่อการพัฒนาสังคม", keywords: ["วิชาการ", "พัฒนาสังคม"] },
+      { id: 14, ssw: "สสว 4", name: "สถาบันวิชาการและยุทธศาสตร์การพัฒนาสังคม", keywords: ["วิชาการ", "ยุทธศาสตร์", "พัฒนาสังคม"] },
+      { id: 15, ssw: "สสว 8", name: "สถาบันวิทยาการและนโยบายสังคม", keywords: ["วิทยาการ", "นโยบายสังคม"] },
+      { id: 16, ssw: "สสว 6", name: "สถาบันส่งเสริมการพัฒนาคุณภาพชีวิตในพื้นที่", keywords: ["ส่งเสริม", "คุณภาพชีวิต", "ระดับพื้นที่"] },
+      { id: 17, ssw: "สสว 4", name: "สถาบันส่งเสริมการเรียนรู้และพัฒนาสังคม", keywords: ["ส่งเสริมการเรียนรู้", "พัฒนาสังคม"] },
+      { id: 18, ssw: "สสว 10", name: "สถาบันส่งเสริมวิชาการเพื่อการพัฒนาสังคม", keywords: ["ส่งเสริมวิชาการ", "พัฒนาสังคม"] },
+      { id: 19, ssw: "สสว 6", name: "สถาบันเสริมพลังการพัฒนาสังคมจากพื้นที่", keywords: ["เสริมพลัง", "พัฒนาสังคม", "ระดับพื้นที่"] },
+      { id: 20, ssw: "สสว 8", name: "สถาบันเสริมสร้างความมั่นคงของมนุษย์", keywords: ["เสริมสร้าง", "ความมั่นคงของมนุษย์"] },
+      { id: 21, ssw: "สสว 6", name: "สำนักงานขับเคลื่อนการพัฒนาสังคม", keywords: ["ขับเคลื่อน", "พัฒนาสังคม"] },
+      { id: 22, ssw: "สสว 5", name: "สำนักงานยุทศาสตร์และพื้นที่ปฏิบัติการทางสังคมจังหวัด", keywords: ["ยุทธศาสตร์", "พื้นที่ปฏิบัติการ", "ระดับจังหวัด"] },
+      { id: 23, ssw: "สสว 1", name: "สำนักงานวิชาการและขับเคลื่อนการพัฒนาสังคม", keywords: ["วิชาการ", "ขับเคลื่อน", "พัฒนาสังคม"] },
+      { id: 24, ssw: "สสว 9", name: "สำนักบริการวิชาการพัฒนาสังคมจังหวัด", keywords: ["บริการวิชาการ", "พัฒนาสังคม", "ระดับจังหวัด"] },
+      { id: 25, ssw: "สสว 11", name: "สำนักวิชาการเพื่อการขับเคลื่อนนโยบายด้านการพัฒนาสังคม", keywords: ["วิชาการ", "ขับเคลื่อนนโยบาย", "พัฒนาสังคม"] },
+      { id: 26, ssw: "สสว 1", name: "สถาบันทางวิชาการด้านการพัฒนาสังคมและความมั่นคงของมนุษย์ระดับพื้นที่", keywords: ["วิชาการ", "พัฒนาสังคม", "ความมั่นคงของมนุษย์", "ระดับพื้นที่"] }
+    ];
+
+    const ADMIN_PIN = "3025";
+
+    let candidates = [];
+    let selectedIds = new Set(); // Stores String IDs for strict consistency
+    let selectedKeyword = "ALL";
+    let currentTab = "vote";
+    let isAdminAuthenticated = false;
+    let isOfflineFallback = false;
+
+    async function seedInitialCloudData() {
+      if (!window.db) return;
+      try {
+        const batch = window.writeBatch(window.db);
+        INITIAL_NAMES.forEach(item => {
+          const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'candidates', item.id.toString());
+          batch.set(docRef, {
+            ssw: item.ssw,
+            name: item.name,
+            keywords: item.keywords,
+            votes: 0
+          });
+        });
+        await batch.commit();
+        console.log("Successfully seeded initial candidate data to Firestore.");
+      } catch (err) {
+        console.error("Error seeding initial cloud data:", err);
+      }
+    }
+
+    window.useLocalFallback = function() {
+      if (isOfflineFallback) return;
+      isOfflineFallback = true;
+      console.log("Operating in LocalStorage fallback mode.");
+
+      const saved = localStorage.getItem('voting_candidates');
+      if (saved) {
+        try {
+          candidates = JSON.parse(saved);
+        } catch(e) {
+          candidates = INITIAL_NAMES.map(item => ({ ...item, votes: 0 }));
+        }
+      } else {
+        candidates = INITIAL_NAMES.map(item => ({ ...item, votes: 0 }));
+        saveToLocalStorage();
+      }
+
+      populateSSWFilters();
+      renderKeywordPills();
+      refreshUI();
+    };
+
+    function saveToLocalStorage() {
+      localStorage.setItem('voting_candidates', JSON.stringify(candidates));
+    }
+
+    function switchTab(tab) {
+      if (tab === 'admin' && !isAdminAuthenticated) {
+        document.getElementById('modal-pin').classList.remove('hidden');
+        document.getElementById('input-pin').value = '';
+        document.getElementById('pin-error').classList.add('hidden');
+        setTimeout(() => document.getElementById('input-pin').focus(), 100);
+        return;
+      }
+
+      currentTab = tab;
+
+      ['vote', 'results', 'admin'].forEach(t => {
+        const view = document.getElementById(`view-${t}`);
+        const nav = document.getElementById(`nav-${t}`);
+        if (view) {
+          if (t === tab) view.classList.remove('hidden');
+          else view.classList.add('hidden');
+        }
+        if (nav) {
+          if (t === tab) {
+            nav.className = "px-2.5 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center space-x-1 sm:space-x-1.5 bg-indigo-800 text-white";
+          } else {
+            nav.className = "px-2.5 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center space-x-1 sm:space-x-1.5 text-indigo-200 hover:bg-indigo-800 hover:text-white";
+          }
+        }
+      });
+
+      refreshUI();
+    }
+
+    function closePinModal() {
+      document.getElementById('modal-pin').classList.add('hidden');
+    }
+
+    function handlePinSubmit(e) {
+      e.preventDefault();
+      const pin = document.getElementById('input-pin').value;
+      if (pin === ADMIN_PIN) {
+        isAdminAuthenticated = true;
+        closePinModal();
+        switchTab('admin');
+        showToast("เข้าสู่ระบบแอดมินเรียบร้อยแล้ว", "success");
+      } else {
+        document.getElementById('pin-error').classList.remove('hidden');
+      }
+    }
+
+    function logoutAdmin() {
+      isAdminAuthenticated = false;
+      showToast("ออกจากระบบแอดมินเรียบร้อยแล้ว", "info");
+      switchTab('vote');
+    }
+
+    function updateVoteCounterUI() {
+      const count = selectedIds.size;
+      const countEl = document.getElementById('vote-selected-count');
+      const badgeEl = document.getElementById('status-badge');
+      const summaryEl = document.getElementById('sticky-selection-summary');
+      const submitBtn = document.getElementById('btn-submit-vote');
+
+      if (countEl) countEl.textContent = count;
+
+      if (badgeEl) {
+        if (count === 3) {
+          badgeEl.textContent = "เลือกครบ 3 ชื่อแล้ว พร้อมส่งโหวต";
+          badgeEl.className = "inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500 text-white";
+        } else {
+          badgeEl.textContent = `ยังเลือกไม่ครบ 3 ชื่อ (ขาดอีก ${3 - count} ชื่อ)`;
+          badgeEl.className = "inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/90 text-white";
+        }
+      }
+
+      if (summaryEl) {
+        if (count === 3) {
+          summaryEl.textContent = "คุณเลือกครบ 3 รายชื่อเรียบร้อยแล้ว";
+        } else {
+          summaryEl.textContent = `กรุณาเลือกให้ครบ 3 ชื่อ (เลือกแล้ว ${count}/3)`;
+        }
+      }
+
+      if (submitBtn) {
+        if (count === 3) {
+          submitBtn.disabled = false;
+          submitBtn.className = "px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer transition-all shadow-lg flex items-center space-x-2 whitespace-nowrap flex-shrink-0 animate-pulse";
+        } else {
+          submitBtn.disabled = true;
+          submitBtn.className = "px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm bg-slate-700 text-slate-400 cursor-not-allowed transition-all shadow-lg flex items-center space-x-2 whitespace-nowrap flex-shrink-0";
+        }
+      }
+    }
+
+    function populateSSWFilters() {
+      const select = document.getElementById('vote-filter-ssw');
+      if (!select) return;
+      const currentVal = select.value;
+      const ssws = Array.from(new Set(candidates.map(c => c.ssw))).filter(Boolean).sort();
+
+      select.innerHTML = '<option value="ALL">ทั้งหมดทุก สสว.</option>' +
+        ssws.map(s => `<option value="${s}">${s}</option>`).join('');
+
+      if (ssws.includes(currentVal)) {
+        select.value = currentVal;
+      }
+    }
+
+    function renderKeywordPills() {
+      const container = document.getElementById('keyword-pills-container');
+      if (!container) return;
+
+      const allKws = new Set();
+      candidates.forEach(c => (c.keywords || []).forEach(k => allKws.add(k)));
+      const kwArray = Array.from(allKws).sort();
+
+      container.innerHTML = `
+        <button onclick="setKeywordFilter('ALL')" class="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${selectedKeyword === 'ALL' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+          ทั้งหมด
+        </button>
+      ` + kwArray.map(kw => `
+        <button onclick="setKeywordFilter('${kw}')" class="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${selectedKeyword === kw ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+          #${kw}
+        </button>
+      `).join('');
+    }
+
+    function setKeywordFilter(kw) {
+      selectedKeyword = kw;
+      renderKeywordPills();
+      renderVoteList();
+    }
+
+    function refreshUI() {
+      if (currentTab === 'vote') renderVoteList();
+      else if (currentTab === 'results') renderResults();
+      else if (currentTab === 'admin') renderAdminTable();
+    }
+
+    window.initCloudSync = function() {
+      if (!window.db || !window.currentUser) {
+        window.useLocalFallback();
+        return;
+      }
+
+      const candidatesCol = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'candidates');
+
+      window.onSnapshot(candidatesCol, async (snapshot) => {
+        if (snapshot.empty) {
+          await seedInitialCloudData();
+          return;
+        }
+
+        const loaded = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          let kw = data.keywords;
+          if (typeof kw === 'string') {
+            kw = kw.split(',').map(s => s.trim()).filter(Boolean);
+          } else if (!Array.isArray(kw)) {
+            kw = [];
+          }
+          loaded.push({
+            id: parseInt(docSnap.id) || docSnap.id,
+            ssw: data.ssw || '',
+            name: data.name || '',
+            keywords: kw,
+            votes: Number(data.votes) || 0
+          });
+        });
+
+        // Sort strictly by ID number ascending
+        candidates = loaded.sort((a, b) => Number(a.id) - Number(b.id));
+
+        populateSSWFilters();
+        renderKeywordPills();
+        refreshUI();
+      }, (error) => {
+        console.warn("Firestore sync failed, falling back to local storage:", error);
+        window.useLocalFallback();
+      });
+    };
+
+    function renderVoteList() {
+      const searchInput = document.getElementById('vote-search-input');
+      const filterSelect = document.getElementById('vote-filter-ssw');
+      const search = searchInput ? searchInput.value.trim().toLowerCase() : '';
+      const filterSSW = filterSelect ? filterSelect.value : 'ALL';
+      const container = document.getElementById('vote-items-container');
+
+      if (!container) return;
+
+      const filtered = candidates.filter(item => {
+        const itemKws = (item.keywords || []).map(k => k.toLowerCase());
+        const idStr = String(item.id);
+        const matchesSearch = item.name.toLowerCase().includes(search) || 
+                              item.ssw.toLowerCase().includes(search) ||
+                              idStr === search ||
+                              `ข้อ ${idStr}`.includes(search) ||
+                              `ข้อที่ ${idStr}`.includes(search) ||
+                              itemKws.some(k => k.includes(search));
+        const matchesSSW = filterSSW === 'ALL' || item.ssw === filterSSW;
+        const matchesKeyword = selectedKeyword === 'ALL' || (item.keywords && item.keywords.includes(selectedKeyword));
+
+        return matchesSearch && matchesSSW && matchesKeyword;
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="col-span-full text-center py-12 bg-white rounded-xl border border-slate-200">
+            <i class="fa-solid fa-folder-open text-4xl text-slate-300 mb-2"></i>
+            <p class="text-slate-500 text-sm">ไม่พบรายชื่อองค์กรหรือเลขข้อที่ค้นหา</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map(item => {
+        const strId = String(item.id);
+        const isChecked = selectedIds.has(strId);
+        const kws = item.keywords || [];
+
+        const kwBadges = kws.map(k => 
+          `<span class="inline-block px-2 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60 rounded-md">#${k}</span>`
+        ).join(' ');
+
+        return `
+          <div onclick="toggleCandidateSelection('${strId}')" 
+               class="bg-white p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md flex items-start space-x-3 ${isChecked ? 'border-indigo-600 bg-indigo-50/40 ring-2 ring-indigo-500/20' : 'border-slate-200 hover:border-slate-300'}">
+            <div class="pt-0.5">
+              <input type="checkbox" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleCandidateSelection('${strId}')" class="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer">
+            </div>
+            <div class="flex-grow space-y-1.5">
+              <div class="flex items-center justify-between">
+                <span class="inline-block px-2.5 py-0.5 text-xs font-bold bg-indigo-600 text-white rounded-md shadow-sm">
+                  ข้อที่ ${item.id}
+                </span>
+                <span class="inline-block px-2 py-0.5 text-[11px] font-semibold bg-slate-100 text-slate-600 rounded-md border border-slate-200">
+                  ${item.ssw}
+                </span>
+              </div>
+              <h4 class="font-bold text-slate-800 text-sm leading-snug">${item.name}</h4>
+              ${kws.length > 0 ? `<div class="flex flex-wrap gap-1 pt-1">${kwBadges}</div>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      updateVoteCounterUI();
+    }
+
+    function toggleCandidateSelection(id) {
+      const strId = String(id);
+      if (selectedIds.has(strId)) {
+        selectedIds.delete(strId);
+      } else {
+        if (selectedIds.size >= 3) {
+          showToast("สามารถเลือกได้สูงสุดไม่เกิน 3 ชื่อเท่านั้น", "warning");
+          return;
+        }
+        selectedIds.add(strId);
+      }
+      renderVoteList();
+    }
+
+    async function submitVote() {
+      if (selectedIds.size !== 3) {
+        showToast("กรุณาเลือกให้ครบ 3 รายชื่อก่อนยืนยัน", "warning");
+        return;
+      }
+
+      const submitBtn = document.getElementById('btn-submit-vote');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = "กำลังบันทึกคะแนน...";
+      }
+
+      try {
+        if (!isOfflineFallback && window.db) {
+          const batch = window.writeBatch(window.db);
+          selectedIds.forEach(strId => {
+            const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'candidates', strId);
+            batch.update(docRef, {
+              votes: window.increment(1)
+            });
+          });
+          await batch.commit();
+        } else {
+          // Local storage fallback logic
+          selectedIds.forEach(strId => {
+            const c = candidates.find(item => String(item.id) === strId);
+            if (c) c.votes = (c.votes || 0) + 1;
+          });
+          saveToLocalStorage();
+        }
+
+        if (typeof confetti === 'function') {
+          confetti({
+            particleCount: 100,
+            spread: 70,
+            origin: { y: 0.6 }
+          });
+        }
+
+        showToast(`บันทึกคะแนนโหวต ${selectedIds.size} รายชื่อเรียบร้อยแล้ว!`, "success");
+        selectedIds.clear();
+        switchTab('results');
+      } catch (err) {
+        console.error("Submit vote error:", err);
+        showToast("เกิดข้อผิดพลาดในการบันทึกคะแนน กรุณาลองใหม่อีกครั้ง", "error");
+      } finally {
+        updateVoteCounterUI();
+      }
+    }
+
+    function renderResults() {
+      const sorted = [...candidates].sort((a, b) => b.votes - a.votes);
+      const totalVotes = candidates.reduce((acc, c) => acc + (c.votes || 0), 0);
+      const estimatedVoters = Math.floor(totalVotes / 3);
+
+      const totalBadge = document.getElementById('total-vote-count-badge');
+      if (totalBadge) totalBadge.textContent = `รวม ${totalVotes} คะแนนโหวต`;
+
+      const votersBadge = document.getElementById('total-voters-badge');
+      if (votersBadge) votersBadge.textContent = `ผู้ลงคะแนนทั้งหมดประมาณ: ${estimatedVoters} คน`;
+
+      const podiumContainer = document.getElementById('podium-container');
+      const rank1 = sorted[0] || null;
+      const rank2 = sorted[1] || null;
+      const rank3 = sorted[2] || null;
+
+      const renderKws = (item) => {
+        if (!item || !item.keywords || item.keywords.length === 0) return '';
+        return `<div class="flex flex-wrap justify-center gap-1 mt-1.5">${item.keywords.map(k => `<span class="px-1.5 py-0.5 text-[10px] bg-indigo-50 text-indigo-700 rounded border border-indigo-100">#${k}</span>`).join('')}</div>`;
+      };
+
+      if (podiumContainer) {
+        podiumContainer.innerHTML = `
+          <!-- Rank 2 (Silver) -->
+          <div class="order-2 md:order-1 bg-white rounded-2xl p-5 border-2 border-slate-200 silver-glow relative flex flex-col justify-between min-h-[220px] md:h-80">
+            <div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-slate-300 text-slate-800 font-extrabold text-xs px-3 py-1 rounded-full border border-slate-400 shadow-sm flex items-center space-x-1">
+              <span>🥈 อันดับ 2</span>
+            </div>
+            <div class="mt-4 text-center space-y-2">
+              <div class="flex justify-center items-center gap-1.5">
+                <span class="px-2 py-0.5 text-xs font-bold bg-indigo-600 text-white rounded">ข้อที่ ${rank2 ? rank2.id : '-'}</span>
+                <span class="inline-block px-2 py-0.5 text-xs font-bold bg-slate-100 text-slate-700 rounded border">${rank2 ? rank2.ssw : '-'}</span>
+              </div>
+              <h4 class="font-bold text-slate-800 text-base leading-snug line-clamp-2">${rank2 ? rank2.name : 'ไม่มีข้อมูล'}</h4>
+              ${renderKws(rank2)}
+            </div>
+            <div class="text-center pt-3 border-t border-slate-100">
+              <span class="text-2xl font-extrabold text-slate-700">${rank2 ? rank2.votes : 0}</span>
+              <span class="text-xs text-slate-400 ml-1">คะแนน</span>
+            </div>
+          </div>
+
+          <!-- Rank 1 (Gold) -->
+          <div class="order-1 md:order-2 bg-gradient-to-b from-amber-50 to-white rounded-2xl p-6 border-2 border-amber-400 gold-glow relative flex flex-col justify-between min-h-[240px] md:h-88 transform md:-translate-y-2">
+            <div class="absolute -top-5 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 font-extrabold text-sm px-4 py-1.5 rounded-full border border-amber-300 shadow-md flex items-center space-x-1">
+              <i class="fa-solid fa-crown text-amber-900"></i>
+              <span>🥇 อันดับ 1</span>
+            </div>
+            <div class="mt-4 text-center space-y-2">
+              <div class="flex justify-center items-center gap-1.5">
+                <span class="px-2.5 py-0.5 text-xs font-bold bg-indigo-600 text-white rounded shadow-sm">ข้อที่ ${rank1 ? rank1.id : '-'}</span>
+                <span class="inline-block px-2.5 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 rounded border border-amber-200">${rank1 ? rank1.ssw : '-'}</span>
+              </div>
+              <h4 class="font-extrabold text-slate-900 text-lg leading-snug line-clamp-2">${rank1 ? rank1.name : 'ไม่มีข้อมูล'}</h4>
+              ${renderKws(rank1)}
+            </div>
+            <div class="text-center pt-3 border-t border-amber-100">
+              <span class="text-4xl font-black text-amber-600">${rank1 ? rank1.votes : 0}</span>
+              <span class="text-xs font-bold text-amber-700 ml-1">คะแนน</span>
+            </div>
+          </div>
+
+          <!-- Rank 3 (Bronze) -->
+          <div class="order-3 bg-white rounded-2xl p-5 border-2 border-amber-800/20 bronze-glow relative flex flex-col justify-between min-h-[200px] md:h-72">
+            <div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-amber-700 text-white font-extrabold text-xs px-3 py-1 rounded-full shadow-sm flex items-center space-x-1">
+              <span>🥉 อันดับ 3</span>
+            </div>
+            <div class="mt-4 text-center space-y-2">
+              <div class="flex justify-center items-center gap-1.5">
+                <span class="px-2 py-0.5 text-xs font-bold bg-indigo-600 text-white rounded">ข้อที่ ${rank3 ? rank3.id : '-'}</span>
+                <span class="inline-block px-2 py-0.5 text-xs font-bold bg-amber-50 text-amber-800 rounded border border-amber-200">${rank3 ? rank3.ssw : '-'}</span>
+              </div>
+              <h4 class="font-bold text-slate-800 text-sm leading-snug line-clamp-2">${rank3 ? rank3.name : 'ไม่มีข้อมูล'}</h4>
+              ${renderKws(rank3)}
+            </div>
+            <div class="text-center pt-3 border-t border-slate-100">
+              <span class="text-2xl font-extrabold text-amber-800">${rank3 ? rank3.votes : 0}</span>
+              <span class="text-xs text-slate-400 ml-1">คะแนน</span>
+            </div>
+          </div>
+        `;
+      }
+
+      const rank4and5 = sorted.slice(3, 5);
+      const r45Container = document.getElementById('rank-4-5-container');
+      if (r45Container) {
+        if (rank4and5.length === 0) {
+          r45Container.innerHTML = '<p class="text-slate-400 text-xs">ยังไม่มีข้อมูลอันดับถัดไป</p>';
+        } else {
+          r45Container.innerHTML = rank4and5.map((item, idx) => `
+            <div class="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+              <div class="flex items-center space-x-3">
+                <span class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-sm flex-shrink-0">
+                  ${idx + 4}
+                </span>
+                <div>
+                  <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+                    <span class="text-xs font-bold bg-indigo-600 text-white px-2 py-0.5 rounded">ข้อที่ ${item.id}</span>
+                    <span class="text-[11px] font-semibold bg-white border px-2 py-0.5 rounded text-slate-500">${item.ssw}</span>
+                    <span class="font-bold text-slate-800 text-sm">${item.name}</span>
+                  </div>
+                  <div class="flex flex-wrap gap-1 mt-1">
+                    ${(item.keywords || []).map(k => `<span class="text-[10px] text-slate-500 bg-slate-200/60 px-1.5 py-0.2 rounded">#${k}</span>`).join('')}
+                  </div>
+                </div>
+              </div>
+              <span class="font-extrabold text-indigo-600 text-sm whitespace-nowrap ml-2">${item.votes} คะแนน</span>
+            </div>
+          `).join('');
+        }
+      }
+
+      const tbody = document.getElementById('all-scores-tbody');
+      if (tbody) {
+        tbody.innerHTML = sorted.map((item, index) => {
+          const percentage = totalVotes > 0 ? ((item.votes / totalVotes) * 100).toFixed(1) : 0;
+          const kws = (item.keywords || []).map(k => `<span class="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">#${k}</span>`).join(' ');
+
+          return `
+            <tr class="hover:bg-slate-50 transition-colors">
+              <td class="py-3 px-4 text-center font-bold text-slate-500">${index + 1}</td>
+              <td class="py-3 px-4 text-center">
+                <span class="font-bold bg-indigo-600 text-white px-2 py-0.5 rounded text-xs">ข้อที่ ${item.id}</span>
+              </td>
+              <td class="py-3 px-4 font-medium text-slate-600">${item.ssw}</td>
+              <td class="py-3 px-4 space-y-1">
+                <div class="font-bold text-slate-800">${item.name}</div>
+                <div class="flex flex-wrap gap-1">${kws}</div>
+              </td>
+              <td class="py-3 px-4 text-right font-extrabold text-indigo-600">${item.votes}</td>
+              <td class="py-3 px-4">
+                <div class="flex items-center space-x-2">
+                  <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                    <div class="bg-indigo-600 h-2 rounded-full" style="width: ${percentage}%"></div>
+                  </div>
+                  <span class="text-xs text-slate-500 font-mono w-10 text-right">${percentage}%</span>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
+
+    function renderAdminTable() {
+      const searchInput = document.getElementById('admin-search-input');
+      const search = searchInput ? searchInput.value.trim().toLowerCase() : '';
+      const tbody = document.getElementById('admin-tbody');
+      
+      const filtered = candidates.filter(c => {
+        const kws = (c.keywords || []).map(k => k.toLowerCase());
+        const idStr = String(c.id);
+        return c.name.toLowerCase().includes(search) || 
+               c.ssw.toLowerCase().includes(search) ||
+               idStr === search ||
+               kws.some(k => k.includes(search));
+      });
+
+      const totalItemsEl = document.getElementById('admin-total-items');
+      if (totalItemsEl) totalItemsEl.textContent = candidates.length;
+
+      if (!tbody) return;
+
+      tbody.innerHTML = filtered.map(item => {
+        const kws = (item.keywords || []).map(k => `<span class="text-[10px] text-slate-600 bg-slate-100 border px-1.5 py-0.5 rounded">#${k}</span>`).join(' ');
+
+        return `
+          <tr class="hover:bg-slate-50 transition-colors">
+            <td class="py-3 px-4 text-center font-bold text-xs text-indigo-700">ข้อที่ ${item.id}</td>
+            <td class="py-3 px-4 font-semibold text-slate-600 text-xs">${item.ssw}</td>
+            <td class="py-3 px-4 space-y-1">
+              <div class="font-bold text-slate-800 text-sm">${item.name}</div>
+              <div class="flex flex-wrap gap-1">${kws}</div>
+            </td>
+            <td class="py-3 px-4 text-center">
+              <span class="bg-indigo-50 text-indigo-700 font-bold px-2.5 py-1 rounded-md text-xs border border-indigo-100">
+                ${item.votes}
+              </span>
+            </td>
+            <td class="py-3 px-4 text-right space-x-1">
+              <button onclick="openEditModal(${item.id})" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-all">
+                <i class="fa-solid fa-pen"></i> แก้ไข
+              </button>
+              <button onclick="promptDeleteCandidate(${item.id})" class="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-semibold transition-all">
+                <i class="fa-solid fa-trash"></i> ลบ
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function handleAddName(e) {
+      e.preventDefault();
+      const sswInput = document.getElementById('add-ssw-input');
+      const nameInput = document.getElementById('add-name-input');
+      const keywordsInput = document.getElementById('add-keywords-input');
+      
+      const ssw = sswInput.value.trim();
+      const name = nameInput.value.trim();
+      const rawKeywords = keywordsInput.value.trim();
+      const keywords = rawKeywords ? rawKeywords.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+      if (!ssw || !name) return;
+
+      try {
+        const numericIds = candidates.map(c => Number(c.id)).filter(n => !isNaN(n));
+        const newId = numericIds.length > 0 ? Math.max(...numericIds) + 1 : 1;
+
+        if (!isOfflineFallback && window.db) {
+          const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'candidates', newId.toString());
+          await window.setDoc(docRef, { ssw, name, keywords, votes: 0 });
+        } else {
+          candidates.push({ id: newId, ssw, name, keywords, votes: 0 });
+          saveToLocalStorage();
+          populateSSWFilters();
+          renderKeywordPills();
+          refreshUI();
+        }
+
+        sswInput.value = '';
+        nameInput.value = '';
+        keywordsInput.value = '';
+        showToast("เพิ่มรายชื่อองค์กรและคีย์เวิร์ดเรียบร้อยแล้ว", "success");
+      } catch (err) {
+        console.error("Add candidate error:", err);
+        showToast("ไม่สามารถเพิ่มรายชื่อได้", "error");
+      }
+    }
+
+    function openEditModal(id) {
+      const candidate = candidates.find(c => c.id === id);
+      if (!candidate) return;
+
+      document.getElementById('edit-id').value = candidate.id;
+      document.getElementById('edit-ssw').value = candidate.ssw;
+      document.getElementById('edit-name').value = candidate.name;
+      document.getElementById('edit-keywords').value = (candidate.keywords || []).join(', ');
+
+      document.getElementById('modal-edit').classList.remove('hidden');
+    }
+
+    function closeEditModal() {
+      document.getElementById('modal-edit').classList.add('hidden');
+    }
+
+    async function handleEditSubmit(e) {
+      e.preventDefault();
+      const id = document.getElementById('edit-id').value;
+      const ssw = document.getElementById('edit-ssw').value.trim();
+      const name = document.getElementById('edit-name').value.trim();
+      const rawKeywords = document.getElementById('edit-keywords').value.trim();
+      const keywords = rawKeywords ? rawKeywords.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+      try {
+        if (!isOfflineFallback && window.db) {
+          const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'candidates', id.toString());
+          await window.updateDoc(docRef, { ssw, name, keywords });
+        } else {
+          const c = candidates.find(item => item.id == id);
+          if (c) { 
+            c.ssw = ssw; 
+            c.name = name; 
+            c.keywords = keywords; 
+          }
+          saveToLocalStorage();
+          populateSSWFilters();
+          renderKeywordPills();
+          refreshUI();
+        }
+
+        closeEditModal();
+        showToast("แก้ไขข้อมูลและคีย์เวิร์ดเรียบร้อยแล้ว", "success");
+      } catch (err) {
+        console.error("Edit candidate error:", err);
+        showToast("ไม่สามารถบันทึกการแก้ไขได้", "error");
+      }
+    }
+
+    function showConfirmModal(title, message, iconClass, iconBgClass, onOk) {
+      document.getElementById('confirm-title').textContent = title;
+      document.getElementById('confirm-message').textContent = message;
+      
+      const iconEl = document.getElementById('confirm-icon');
+      if (iconEl) iconEl.className = iconClass;
+      const bgEl = document.getElementById('confirm-icon-bg');
+      if (bgEl) bgEl.className = `w-14 h-14 rounded-full flex items-center justify-center mx-auto text-2xl ${iconBgClass}`;
+
+      const modal = document.getElementById('modal-confirm');
+      modal.classList.remove('hidden');
+
+      const okBtn = document.getElementById('btn-confirm-ok');
+      const cancelBtn = document.getElementById('btn-confirm-cancel');
+
+      const cleanup = () => {
+        modal.classList.add('hidden');
+        okBtn.onclick = null;
+        cancelBtn.onclick = null;
+      };
+
+      okBtn.onclick = () => {
+        cleanup();
+        onOk();
+      };
+      cancelBtn.onclick = cleanup;
+    }
+
+    function promptDeleteCandidate(id) {
+      const item = candidates.find(c => c.id === id);
+      if (!item) return;
+
+      showConfirmModal(
+        "ยืนยันการลบรายชื่อ",
+        `คุณต้องการลบ "${item.name}" ออกจากระบบใช่หรือไม่?`,
+        "fa-solid fa-trash",
+        "bg-red-100 text-red-600",
+        async () => {
+          try {
+            if (!isOfflineFallback && window.db) {
+              const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'candidates', id.toString());
+              await window.deleteDoc(docRef);
+            } else {
+              candidates = candidates.filter(c => c.id !== id);
+              saveToLocalStorage();
+              populateSSWFilters();
+              renderKeywordPills();
+              refreshUI();
+            }
+            showToast("ลบรายชื่อเรียบร้อยแล้ว", "info");
+          } catch (err) {
+            console.error("Delete error:", err);
+            showToast("ไม่สามารถลบรายชื่อได้", "error");
+          }
+        }
+      );
+    }
+
+    function promptResetVotes() {
+      showConfirmModal(
+        "ยืนยันการล้างคะแนนโหวต",
+        "คุณต้องการล้างคะแนนโหวตทั้งหมดให้เป็น 0 คะแนนใช่หรือไม่? (ไม่สามารถย้อนกลับได้)",
+        "fa-solid fa-rotate-left",
+        "bg-amber-100 text-amber-600",
+        async () => {
+          try {
+            if (!isOfflineFallback && window.db) {
+              const batch = window.writeBatch(window.db);
+              candidates.forEach(c => {
+                const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'candidates', c.id.toString());
+                batch.update(docRef, { votes: 0 });
+              });
+              await batch.commit();
+            } else {
+              candidates.forEach(c => c.votes = 0);
+              saveToLocalStorage();
+              refreshUI();
+            }
+            showToast("ล้างคะแนนโหวตทั้งหมดเป็น 0 เรียบร้อยแล้ว", "warning");
+          } catch (err) {
+            console.error("Reset votes error:", err);
+            showToast("ไม่สามารถล้างคะแนนโหวตได้", "error");
+          }
+        }
+      );
+    }
+
+    function promptRestoreDefaults() {
+      showConfirmModal(
+        "คืนค่ารายชื่อเริ่มต้น",
+        "คุณต้องการรีเซ็ตกลับเป็นรายชื่อตั้งต้น 26 ชื่อเดิมพร้อมคีย์เวิร์ดใช่หรือไม่? คะแนนทั้งหมดจะถูกรีเซ็ตด้วย",
+        "fa-solid fa-triangle-exclamation",
+        "bg-slate-200 text-slate-800",
+        async () => {
+          try {
+            if (!isOfflineFallback && window.db) {
+              const batch = window.writeBatch(window.db);
+              candidates.forEach(c => {
+                const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'candidates', c.id.toString());
+                batch.delete(docRef);
+              });
+              INITIAL_NAMES.forEach(item => {
+                const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'candidates', item.id.toString());
+                batch.set(docRef, { ssw: item.ssw, name: item.name, keywords: item.keywords, votes: 0 });
+              });
+              await batch.commit();
+            } else {
+              candidates = INITIAL_NAMES.map(item => ({ ...item, votes: 0 }));
+              saveToLocalStorage();
+              populateSSWFilters();
+              renderKeywordPills();
+              refreshUI();
+            }
+            showToast("คืนค่ารายชื่อและคีย์เวิร์ดเริ่มต้นเรียบร้อยแล้ว", "info");
+          } catch (err) {
+            console.error("Restore defaults error:", err);
+            showToast("ไม่สามารถคืนค่ารายชื่อเริ่มต้นได้", "error");
+          }
+        }
+      );
+    }
+
+    function showToast(message, type = "info") {
+      const container = document.getElementById('toast-container');
+      if (!container) return;
+
+      const toast = document.createElement('div');
+      
+      let bgClass = "bg-slate-800 text-white";
+      let icon = "fa-circle-info";
+
+      if (type === "success") {
+        bgClass = "bg-emerald-600 text-white";
+        icon = "fa-circle-check";
+      } else if (type === "warning") {
+        bgClass = "bg-amber-500 text-white";
+        icon = "fa-triangle-exclamation";
+      } else if (type === "error") {
+        bgClass = "bg-red-600 text-white";
+        icon = "fa-circle-xmark";
+      }
+
+      toast.className = `${bgClass} px-4 py-3 rounded-xl shadow-xl flex items-center space-x-2 text-sm pointer-events-auto transform transition-all duration-300 translate-x-10 opacity-0`;
+      toast.innerHTML = `
+        <i class="fa-solid ${icon}"></i>
+        <span class="font-medium">${message}</span>
+      `;
+
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.classList.remove('translate-x-10', 'opacity-0');
+      }, 10);
+
+      setTimeout(() => {
+        toast.classList.add('translate-x-10', 'opacity-0');
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    // Initial local boot if Firebase takes time or runs standalone
+    setTimeout(() => {
+      if (candidates.length === 0) {
+        window.useLocalFallback();
+      }
+    }, 1500);
+  </script>
+</body>
+</html>
